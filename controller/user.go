@@ -288,6 +288,7 @@ func Register(c *gin.Context) {
 		return
 	}
 	// 生成默认令牌
+	defaultTokenKey := ""
 	if constant.GenerateDefaultToken {
 		key, err := common.GenerateKey()
 		if err != nil {
@@ -295,11 +296,13 @@ func Register(c *gin.Context) {
 			common.SysLog("failed to generate token key: " + err.Error())
 			return
 		}
+		defaultTokenKey = key
 		// 生成默认令牌
 		token := model.Token{
 			UserId:             insertedUser.Id, // 使用插入后的用户ID
 			Name:               cleanUser.Username + "的初始令牌",
-			Key:                key,
+			KeyHash:            model.HashTokenKey(key),
+			KeyPrefix:          model.BuildTokenKeyPrefix(key),
 			CreatedTime:        common.GetTimestamp(),
 			AccessedTime:       common.GetTimestamp(),
 			ExpiredTime:        -1,     // 永不过期
@@ -316,11 +319,14 @@ func Register(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	response := gin.H{
 		"success": true,
 		"message": "",
-	})
-	return
+	}
+	if defaultTokenKey != "" {
+		response["data"] = gin.H{"default_token_key": defaultTokenKey}
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 func GetAllUsers(c *gin.Context) {

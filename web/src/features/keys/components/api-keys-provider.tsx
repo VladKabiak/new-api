@@ -22,8 +22,6 @@ import { toast } from 'sonner'
 
 import useDialogState from '@/hooks/use-dialog'
 
-import { fetchTokenKey, fetchTokenKeysBatch } from '../api'
-import { ERROR_MESSAGES } from '../constants'
 import { type ApiKey, type ApiKeysDialogType } from '../types'
 
 type ApiKeysContextType = {
@@ -41,6 +39,12 @@ type ApiKeysContextType = {
   loadingKeys: Record<number, boolean>
   copiedKeyId: number | null
   markKeyCopied: (id: number) => void
+  /**
+   * Records the cleartext of a key the server just issued. Keys are stored only
+   * as hashes, so creation is the one moment their cleartext exists — holding it
+   * here is what still allows copying it from the list, for this page load only.
+   */
+  rememberCreatedKey: (id: number, key: string) => void
 }
 
 const ApiKeysContext = React.createContext<ApiKeysContextType | null>(null)
@@ -53,8 +57,9 @@ export function ApiKeysProvider({ children }: { children: React.ReactNode }) {
   const [resolvedKey, setResolvedKey] = useState('')
 
   const [resolvedKeys, setResolvedKeys] = useState<Record<number, string>>({})
-  const [loadingKeys, setLoadingKeys] = useState<Record<number, boolean>>({})
-  const pendingRequests = useRef<Record<number, Promise<string | null>>>({})
+  // Resolving a key no longer performs a request, so nothing is ever in flight.
+  // Kept so consumers that render a per-key pending state stay unchanged.
+  const [loadingKeys] = useState<Record<number, boolean>>({})
 
   const [copiedKeyId, setCopiedKeyId] = useState<number | null>(null)
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
@@ -73,83 +78,41 @@ export function ApiKeysProvider({ children }: { children: React.ReactNode }) {
     setRefreshTrigger((prev) => prev + 1)
   }, [])
 
+  const rememberCreatedKey = useCallback((id: number, key: string) => {
+    setResolvedKeys((prev) => ({ ...prev, [id]: `sk-${key}` }))
+  }, [])
+
+  // A key's cleartext exists only in the response that created it — the server
+  // stores nothing but a SHA-256 hash and has no endpoint that can re-serve one.
+  // So these resolvers read the keys this page captured at creation and never
+  // hit the network.
   const resolveRealKey = useCallback(
     async (id: number): Promise<string | null> => {
       if (resolvedKeys[id]) return resolvedKeys[id]
-      if (id in pendingRequests.current) return pendingRequests.current[id]
-
-      const request = (async () => {
-        setLoadingKeys((prev) => ({ ...prev, [id]: true }))
-        try {
-          const res = await fetchTokenKey(id)
-          if (res.success && res.data?.key) {
-            const fullKey = `sk-${res.data.key}`
-            setResolvedKeys((prev) => ({ ...prev, [id]: fullKey }))
-            return fullKey
-          }
-          toast.error(res.message || t(ERROR_MESSAGES.UNEXPECTED))
-          return null
-        } catch {
-          toast.error(t(ERROR_MESSAGES.UNEXPECTED))
-          return null
-        } finally {
-          delete pendingRequests.current[id]
-          setLoadingKeys((prev) => {
-            const next = { ...prev }
-            delete next[id]
-            return next
-          })
-        }
-      })()
-
-      pendingRequests.current[id] = request
-      return request
+      toast.error(
+        t(
+          'This key can only be copied right after it is created. Create a new key to get a usable value.'
+        )
+      )
+      return null
     },
     [resolvedKeys, t]
   )
 
   const resolveRealKeysBatch = useCallback(
     async (ids: number[]): Promise<Record<number, string>> => {
-      const uncachedIds = ids.filter((id) => !resolvedKeys[id])
-      if (uncachedIds.length === 0) {
-        const result: Record<number, string> = {}
-        for (const id of ids) result[id] = resolvedKeys[id]
-        return result
+      const result: Record<number, string> = {}
+      for (const id of ids) {
+        if (resolvedKeys[id]) result[id] = resolvedKeys[id]
       }
-
-      for (const id of uncachedIds) {
-        setLoadingKeys((prev) => ({ ...prev, [id]: true }))
+      if (Object.keys(result).length < ids.length) {
+        toast.error(
+          t(
+            'Only keys created in this session can be copied. Older keys are stored as hashes and cannot be retrieved.'
+          )
+        )
       }
-
-      try {
-        const res = await fetchTokenKeysBatch(uncachedIds)
-        if (res.success && res.data?.keys) {
-          const newKeys: Record<number, string> = {}
-          for (const [idStr, key] of Object.entries(res.data.keys)) {
-            newKeys[Number(idStr)] = `sk-${key}`
-          }
-          setResolvedKeys((prev) => ({ ...prev, ...newKeys }))
-
-          const result: Record<number, string> = { ...newKeys }
-          for (const id of ids) {
-            if (resolvedKeys[id]) result[id] = resolvedKeys[id]
-          }
-          return result
-        }
-        toast.error(res.message || t(ERROR_MESSAGES.UNEXPECTED))
-        return {}
-      } catch {
-        toast.error(t(ERROR_MESSAGES.UNEXPECTED))
-        return {}
-      } finally {
-        for (const id of uncachedIds) {
-          setLoadingKeys((prev) => {
-            const next = { ...prev }
-            delete next[id]
-            return next
-          })
-        }
-      }
+      return result
     },
     [resolvedKeys, t]
   )
@@ -171,6 +134,7 @@ export function ApiKeysProvider({ children }: { children: React.ReactNode }) {
         loadingKeys,
         copiedKeyId,
         markKeyCopied,
+        rememberCreatedKey,
       }}
     >
       {children}

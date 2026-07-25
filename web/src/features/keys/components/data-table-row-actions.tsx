@@ -87,32 +87,19 @@ export function DataTableRowActions<TData>({
     setResolvedKey,
     resolveRealKey,
     resolvedKeys,
-    loadingKeys,
   } = useApiKeys()
   const isEnabled = apiKey.status === API_KEY_STATUS.ENABLED
   const { chatPresets, serverAddress } = useChatPresets()
   const [isTogglingStatus, setIsTogglingStatus] = useState(false)
   const resolvedRealKey = resolvedKeys[apiKey.id]
-  const isRealKeyLoading = Boolean(loadingKeys[apiKey.id])
-
   const hasChatPresets = chatPresets.length > 0
   const toggleLabel = isEnabled ? t('Disable') : t('Enable')
-
-  const handleMenuOpenChange = useCallback(
-    (open: boolean) => {
-      if (open && !resolvedRealKey && !isRealKeyLoading) {
-        void resolveRealKey(apiKey.id)
-      }
-    },
-    [apiKey.id, isRealKeyLoading, resolvedRealKey, resolveRealKey]
-  )
 
   const getCachedRealKey = useCallback(() => {
     if (resolvedRealKey) return resolvedRealKey
     void resolveRealKey(apiKey.id)
-    toast.info(t('API key is loading, please try again in a moment'))
     return null
-  }, [apiKey.id, resolvedRealKey, resolveRealKey, t])
+  }, [apiKey.id, resolvedRealKey, resolveRealKey])
 
   const handleOpenChatPreset = useCallback(
     async (preset: ChatPreset) => {
@@ -236,7 +223,6 @@ export function DataTableRowActions<TData>({
         ariaLabel={t('Open menu')}
         contentClassName='w-[200px]'
         modal={false}
-        onOpenChange={handleMenuOpenChange}
       >
         <DropdownMenuItem
           onClick={async () => {

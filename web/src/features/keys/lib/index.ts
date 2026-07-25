@@ -27,3 +27,8 @@ export {
   transformFormDataToPayload,
   transformApiKeyToFormDefaults,
 } from './api-key-form'
+
+// ============================================================================
+// Display Utilities
+// ============================================================================
+export { maskApiKey } from './mask-api-key'

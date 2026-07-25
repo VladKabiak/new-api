@@ -171,6 +171,22 @@ export function SignUpForm({
 
       if (res?.success) {
         toast.success(t('Account created! Please sign in'))
+        const initialKey = res.data?.default_token_key
+        if (initialKey) {
+          toast.info(`sk-${initialKey}`, {
+            duration: Infinity,
+            closeButton: true,
+            description: t(
+              'Your initial API key — copy it now, it cannot be shown again.'
+            ),
+            action: {
+              label: t('Copy'),
+              onClick: () => {
+                void navigator.clipboard?.writeText(`sk-${initialKey}`)
+              },
+            },
+          })
+        }
         redirectToLogin()
       } else {
         toast.error(res?.message || t('Failed to create account'))

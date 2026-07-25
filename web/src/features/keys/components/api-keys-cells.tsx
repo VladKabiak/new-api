@@ -36,6 +36,7 @@ import {
 import { copyToClipboard } from '@/lib/copy-to-clipboard'
 import { formatQuota } from '@/lib/format'
 
+import { maskApiKey } from '../lib'
 import type { ApiKey } from '../types'
 import { useApiKeys } from './api-keys-provider'
 
@@ -53,17 +54,14 @@ export function ApiKeyCell({ apiKey }: { apiKey: ApiKey }) {
   const isLoading = !!loadingKeys[apiKey.id]
   const resolvedFullKey = resolvedKeys[apiKey.id]
   const isCopied = copiedKeyId === apiKey.id
-  const maskedKey = `sk-${apiKey.key}`
+  const maskedKey = maskApiKey(apiKey.key_prefix)
 
-  const handlePopoverOpen = useCallback(
-    (open: boolean) => {
-      setPopoverOpen(open)
-      if (open && !resolvedFullKey) {
-        resolveRealKey(apiKey.id)
-      }
-    },
-    [resolvedFullKey, resolveRealKey, apiKey.id]
-  )
+  // Opening the popover no longer pre-fetches anything — resolving a key is a
+  // local cache lookup — so it must not surface an error. The copy action below
+  // reports an unavailable key when the user actually asks for it.
+  const handlePopoverOpen = useCallback((open: boolean) => {
+    setPopoverOpen(open)
+  }, [])
 
   const handleCopy = useCallback(async () => {
     const realKey = resolvedFullKey || (await resolveRealKey(apiKey.id))

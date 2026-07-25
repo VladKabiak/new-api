@@ -1,6 +1,9 @@
 package model
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,7 +17,8 @@ import (
 type Token struct {
 	Id                 int            `json:"id"`
 	UserId             int            `json:"user_id" gorm:"index"`
-	Key                string         `json:"key" gorm:"type:varchar(128);uniqueIndex"`
+	KeyHash            string         `json:"-" gorm:"type:varchar(64);uniqueIndex"`
+	KeyPrefix          string         `json:"key_prefix" gorm:"type:varchar(16)"`
 	Status             int            `json:"status" gorm:"default:1"`
 	Name               string         `json:"name" gorm:"index" `
 	CreatedTime        int64          `json:"created_time" gorm:"bigint"`
@@ -56,29 +60,35 @@ func (token *Token) SetAutoGroups(groups []string) error {
 	return nil
 }
 
-func (token *Token) Clean() {
-	token.Key = ""
+func NormalizeTokenKey(key string) string {
+	key = TrimTokenKeyPrefix(strings.TrimSpace(key))
+	if idx := strings.Index(key, "-"); idx >= 0 {
+		key = key[:idx]
+	}
+	return key
 }
 
-func MaskTokenKey(key string) string {
-	if key == "" {
+func TrimTokenKeyPrefix(key string) string {
+	return strings.TrimPrefix(key, "sk-")
+}
+
+func HashTokenKey(key string) string {
+	normalized := NormalizeTokenKey(key)
+	if normalized == "" {
 		return ""
 	}
-	if len(key) <= 4 {
-		return strings.Repeat("*", len(key))
-	}
-	if len(key) <= 8 {
-		return key[:2] + "****" + key[len(key)-2:]
-	}
-	return key[:4] + "**********" + key[len(key)-4:]
+	sum := sha256.Sum256([]byte(normalized))
+	return hex.EncodeToString(sum[:])
 }
 
-func (token *Token) GetFullKey() string {
-	return token.Key
-}
+const minKeyLenForPrefix = 32
 
-func (token *Token) GetMaskedKey() string {
-	return MaskTokenKey(token.Key)
+func BuildTokenKeyPrefix(key string) string {
+	key = NormalizeTokenKey(key)
+	if len(key) < minKeyLenForPrefix {
+		return ""
+	}
+	return key[:4] + key[len(key)-4:]
 }
 
 func (token *Token) GetIpLimits() []string {
@@ -165,13 +175,8 @@ func SearchUserTokens(userId int, keyword string, token string, offset int, limi
 		offset = 0
 	}
 
-	if token != "" {
-		token = strings.TrimPrefix(token, "sk-")
-	}
-
-	// 超量用户（令牌数超过上限）只允许精确搜索，禁止模糊搜索
 	maxTokens := operation_setting.GetMaxUserTokens()
-	hasFuzzy := strings.Contains(keyword, "%") || strings.Contains(token, "%")
+	hasFuzzy := strings.Contains(keyword, "%")
 	if hasFuzzy {
 		count, err := CountUserTokens(userId)
 		if err != nil {
@@ -194,11 +199,11 @@ func SearchUserTokens(userId int, keyword string, token string, offset int, limi
 		baseQuery = baseQuery.Where("name LIKE ? ESCAPE '!'", keywordPattern)
 	}
 	if token != "" {
-		tokenPattern, err := sanitizeLikePattern(token)
-		if err != nil {
-			return nil, 0, err
+		keyHash := HashTokenKey(token)
+		if keyHash == "" {
+			return []*Token{}, 0, nil
 		}
-		baseQuery = baseQuery.Where(commonKeyCol+" LIKE ? ESCAPE '!'", tokenPattern)
+		baseQuery = baseQuery.Where("key_hash = ?", keyHash)
 	}
 
 	// 先查匹配总数（用于分页，受 maxTokens 上限保护，避免全表 COUNT）
@@ -221,7 +226,11 @@ func ValidateUserToken(key string) (token *Token, err error) {
 	if key == "" {
 		return nil, ErrTokenNotProvided
 	}
-	token, err = GetTokenByKey(key, false)
+	keyHash := HashTokenKey(key)
+	if keyHash == "" {
+		return nil, ErrTokenNotProvided
+	}
+	token, err = GetTokenByKey(keyHash, false)
 	if err == nil {
 		if token.Status == common.TokenStatusExhausted ||
 			token.Status == common.TokenStatusExpired ||
@@ -277,18 +286,25 @@ func GetTokenById(id int) (*Token, error) {
 	return &token, err
 }
 
-func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
+func GetTokenByKey(keyHash string, fromDB bool) (token *Token, err error) {
+	if keyHash == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
 	if !fromDB && common.RedisEnabled {
 		// Try Redis first
-		token, err := cacheGetTokenByKey(key)
+		token, err := cacheGetTokenByKey(keyHash)
 		if err == nil {
 			return token, nil
 		}
 		// Don't return error - fall through to DB
 	}
 	token = &Token{}
-	if err = DB.Where(commonKeyCol+" = ?", key).First(token).Error; err != nil {
+	if err = DB.Where("key_hash = ?", keyHash).First(token).Error; err != nil {
 		return nil, err
+	}
+	// MySQL 与 PostgreSQL 可能以宽松排序规则比较 varchar，故再做一次常量时间校验。
+	if subtle.ConstantTimeCompare([]byte(token.KeyHash), []byte(keyHash)) != 1 {
+		return nil, gorm.ErrRecordNotFound
 	}
 	if common.RedisEnabled {
 		// 冷缓存时用数据库快照初始化；已存在的哈希只刷新 TTL，
@@ -309,7 +325,7 @@ func (token *Token) Insert() error {
 // Update Make sure your token's fields is completed, because this will update non-zero values
 func (token *Token) Update() (err error) {
 	// 写库前失效缓存并设置 fence，防止并发读者把过期快照重新写回缓存。
-	if cacheErr := invalidateTokenCacheForMutation(token.Key); cacheErr != nil {
+	if cacheErr := invalidateTokenCacheForMutation(token.KeyHash); cacheErr != nil {
 		common.SysLog("failed to invalidate token cache before update: " + cacheErr.Error())
 	}
 	return DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
@@ -317,7 +333,7 @@ func (token *Token) Update() (err error) {
 }
 
 func (token *Token) SelectUpdate() (err error) {
-	if cacheErr := invalidateTokenCacheForMutation(token.Key); cacheErr != nil {
+	if cacheErr := invalidateTokenCacheForMutation(token.KeyHash); cacheErr != nil {
 		common.SysLog("failed to invalidate token cache before status update: " + cacheErr.Error())
 	}
 	// This can update zero values
@@ -325,7 +341,7 @@ func (token *Token) SelectUpdate() (err error) {
 }
 
 func (token *Token) Delete() (err error) {
-	if cacheErr := invalidateTokenCacheForMutation(token.Key); cacheErr != nil {
+	if cacheErr := invalidateTokenCacheForMutation(token.KeyHash); cacheErr != nil {
 		common.SysLog("failed to invalidate token cache before delete: " + cacheErr.Error())
 	}
 	return DB.Delete(token).Error
@@ -470,14 +486,6 @@ func BatchDeleteTokens(ids []int, userId int) (int, error) {
 	return len(tokens), nil
 }
 
-func GetTokenKeysByIds(ids []int, userId int) ([]Token, error) {
-	var tokens []Token
-	err := DB.Select("id", commonKeyCol).
-		Where("user_id = ? AND id IN (?)", userId, ids).
-		Find(&tokens).Error
-	return tokens, err
-}
-
 // InvalidateUserTokensCache 清理指定用户所有令牌在 Redis 中的缓存，
 // 配合 InvalidateUserCache 使用，可在用户被禁用/删除时立即阻断其令牌的请求。
 // 下一次请求将从数据库重新加载令牌及用户状态，从而立即识别出被禁用的用户。
@@ -490,7 +498,7 @@ func InvalidateUserTokensCache(userId int) error {
 	}
 	var tokens []Token
 	if err := DB.Unscoped().
-		Select("id", commonKeyCol).
+		Select("id", "key_hash").
 		Where("user_id = ?", userId).
 		Find(&tokens).Error; err != nil {
 		return err
@@ -504,10 +512,10 @@ func invalidateTokensCache(tokens []Token) error {
 	}
 	var firstErr error
 	for _, t := range tokens {
-		if t.Key == "" {
+		if t.KeyHash == "" {
 			continue
 		}
-		if err := invalidateTokenCacheForMutation(t.Key); err != nil && firstErr == nil {
+		if err := invalidateTokenCacheForMutation(t.KeyHash); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}

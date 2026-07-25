@@ -47,7 +47,8 @@ import {
 } from '@/components/page-transition'
 import { Button } from '@/components/ui/button'
 import { IconBadge, type IconBadgeTone } from '@/components/ui/icon-badge'
-import { fetchTokenKey, getApiKeys } from '@/features/keys/api'
+import { getApiKeys } from '@/features/keys/api'
+import { maskApiKey } from '@/features/keys/lib'
 import type { ApiKey } from '@/features/keys/types'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { getUserModels } from '@/lib/api'
@@ -294,21 +295,20 @@ function RequestPreview(props: {
 
     setIsCopying(true)
     try {
-      const result = await fetchTokenKey(props.example.keyId)
-      const key = result.success && result.data?.key ? result.data.key : ''
-      if (!key) {
-        toast.error(result.message || t('Failed to copy to clipboard'))
-        return
-      }
-
-      const realCurl = buildCurlCommand({
+      // A stored key's cleartext is unrecoverable (only its hash is kept), so the
+      // copied command carries a placeholder for the user to substitute.
+      const templateCurl = buildCurlCommand({
         endpoint: props.example.endpoint,
-        apiKey: `sk-${key}`,
+        apiKey: 'YOUR_API_KEY',
         model: props.example.model,
       })
-      const copied = await copyToClipboard(realCurl)
+      const copied = await copyToClipboard(templateCurl)
       if (copied) {
-        toast.success(t('Copied to clipboard'))
+        toast.success(
+          t(
+            'Copied to clipboard — replace YOUR_API_KEY with your key (keys cannot be retrieved after creation)'
+          )
+        )
       } else {
         toast.error(t('Failed to copy to clipboard'))
       }
@@ -596,7 +596,7 @@ export function OverviewDashboard() {
       keyName,
       keyId: preferredKey?.id,
       displayKey: preferredKey
-        ? formatDisplayKey(`sk-${preferredKey.key}`)
+        ? formatDisplayKey(maskApiKey(preferredKey.key_prefix))
         : 'sk-...',
       ready,
     }

@@ -103,7 +103,7 @@ export function ApiKeysMutateDrawer({
   const { t } = useTranslation()
   const isUpdate = !!currentRow
   const currentRowId = currentRow?.id
-  const { triggerRefresh } = useApiKeys()
+  const { triggerRefresh, rememberCreatedKey } = useApiKeys()
   const { status, loading: statusLoading } = useStatus()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -309,6 +309,11 @@ export function ApiKeysMutateDrawer({
           })
           if (result.success) {
             successCount++
+            // The cleartext key is in this response and nowhere else ever again;
+            // hand it to the provider so the list can still offer "copy key".
+            if (result.data?.id && result.data.key) {
+              rememberCreatedKey(result.data.id, result.data.key)
+            }
           } else {
             toast.error(result.message || t(ERROR_MESSAGES.CREATE_FAILED))
             break
@@ -320,6 +325,11 @@ export function ApiKeysMutateDrawer({
             t('Successfully created {{count}} API Key(s)', {
               count: successCount,
             })
+          )
+          toast.info(
+            t(
+              'Copy your new key now — it is stored only as a hash and cannot be shown again.'
+            )
           )
           onOpenChange(false)
           triggerRefresh()

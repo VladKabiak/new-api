@@ -13,14 +13,14 @@ func TestTokenAutoGroupsRoundTripThroughRedisHashCache(t *testing.T) {
 	token := Token{
 		Id:         42,
 		UserId:     7,
-		Key:        "token-auto-groups-cache-key",
+		KeyHash:    HashTokenKey(common.GetRandomString(48)),
 		Name:       "auto-cache",
 		Group:      "auto",
 		AutoGroups: `["vip","default"]`,
 	}
 
 	require.NoError(t, cacheSetTokenForTest(token))
-	cached, err := cacheGetTokenByKey(token.Key)
+	cached, err := cacheGetTokenByKey(token.KeyHash)
 	require.NoError(t, err)
 	assert.Equal(t, token.AutoGroups, cached.AutoGroups)
 	groups, err := cached.GetAutoGroups()
@@ -33,7 +33,7 @@ func TestTokenUpdateSynchronouslyNarrowsPreheatedAutoGroupsCache(t *testing.T) {
 	useUserCacheMiniRedis(t)
 	token := Token{
 		UserId:          7,
-		Key:             "token-auto-groups-update-cache-key",
+		KeyHash:         HashTokenKey(common.GetRandomString(48)),
 		Name:            "auto-cache-update",
 		Status:          common.TokenStatusEnabled,
 		ExpiredTime:     -1,
@@ -45,7 +45,7 @@ func TestTokenUpdateSynchronouslyNarrowsPreheatedAutoGroupsCache(t *testing.T) {
 	require.NoError(t, token.Insert())
 	require.NoError(t, cacheSetTokenForTest(token))
 
-	preheated, err := cacheGetTokenByKey(token.Key)
+	preheated, err := cacheGetTokenByKey(token.KeyHash)
 	require.NoError(t, err)
 	assert.JSONEq(t, `["default","vip"]`, preheated.AutoGroups)
 
@@ -53,9 +53,9 @@ func TestTokenUpdateSynchronouslyNarrowsPreheatedAutoGroupsCache(t *testing.T) {
 	require.NoError(t, token.Update())
 	// Update 是限制性变更：写库前删除缓存并设置 fence。缓存不再提供旧的
 	// 宽分组值，下一次读取必须看到收紧后的分组。
-	_, cacheErr := cacheGetTokenByKey(token.Key)
+	_, cacheErr := cacheGetTokenByKey(token.KeyHash)
 	require.Error(t, cacheErr, "the pre-update cache entry must be invalidated")
-	reloaded, err := GetTokenByKey(token.Key, false)
+	reloaded, err := GetTokenByKey(token.KeyHash, false)
 	require.NoError(t, err)
 	assert.JSONEq(t, `["vip"]`, reloaded.AutoGroups)
 }

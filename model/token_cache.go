@@ -9,12 +9,12 @@ import (
 	"github.com/QuantumNous/new-api/common"
 )
 
-func getTokenCacheKey(key string) string {
-	return fmt.Sprintf("token:%s", common.GenerateHMAC(key))
+func getTokenCacheKey(keyHash string) string {
+	return fmt.Sprintf("token:%s", keyHash)
 }
 
-func getTokenCacheFenceKey(key string) string {
-	return fmt.Sprintf("token:fence:%s", common.GenerateHMAC(key))
+func getTokenCacheFenceKey(keyHash string) string {
+	return fmt.Sprintf("token:fence:%s", keyHash)
 }
 
 func tokenCacheTTLSeconds() int {
@@ -35,16 +35,16 @@ const tokenCacheFenceSeconds = 10
 // invalidateTokenCacheForMutation is called before a token metadata mutation
 // writes to the database: it raises the fence and drops the cached hash so no
 // reader can act on (or re-publish) the pre-mutation state.
-func invalidateTokenCacheForMutation(key string) error {
-	if !common.RedisEnabled || key == "" {
+func invalidateTokenCacheForMutation(keyHash string) error {
+	if !common.RedisEnabled || keyHash == "" {
 		return nil
 	}
 	ctx := context.Background()
-	err := common.RDB.Set(ctx, getTokenCacheFenceKey(key), 1, time.Duration(tokenCacheFenceSeconds)*time.Second).Err()
+	err := common.RDB.Set(ctx, getTokenCacheFenceKey(keyHash), 1, time.Duration(tokenCacheFenceSeconds)*time.Second).Err()
 	if err != nil {
 		return err
 	}
-	return common.RDB.Del(ctx, getTokenCacheKey(key)).Err()
+	return common.RDB.Del(ctx, getTokenCacheKey(keyHash)).Err()
 }
 
 // cacheInitToken publishes a database snapshot only when no mutation fence is
@@ -56,6 +56,9 @@ func invalidateTokenCacheForMutation(key string) error {
 func cacheInitToken(token Token) (int, error) {
 	if !common.RedisEnabled {
 		return 0, nil
+	}
+	if token.KeyHash == "" {
+		return 0, fmt.Errorf("token %d has no key hash to cache by", token.Id)
 	}
 	allowIps := ""
 	if token.AllowIps != nil {
@@ -79,7 +82,7 @@ redis.call('EXPIRE', KEYS[1], ARGV[17])
 return 1`
 
 	return common.RDB.Eval(context.Background(), script, []string{
-		getTokenCacheKey(token.Key), getTokenCacheFenceKey(token.Key),
+		getTokenCacheKey(token.KeyHash), getTokenCacheFenceKey(token.KeyHash),
 	},
 		token.Id, token.UserId, token.Status, token.Name,
 		token.CreatedTime, token.AccessedTime, token.ExpiredTime,
@@ -91,17 +94,22 @@ return 1`
 }
 
 // cacheGetTokenByKey 从缓存读取 token；不完整的哈希（如仅有配额字段）会被拒绝。
-func cacheGetTokenByKey(key string) (*Token, error) {
+func cacheGetTokenByKey(keyHash string) (*Token, error) {
 	if !common.RedisEnabled {
 		return nil, fmt.Errorf("redis is not enabled")
 	}
+	if keyHash == "" {
+		return nil, fmt.Errorf("empty token key hash")
+	}
 	var token Token
-	if err := common.RedisHGetObj(getTokenCacheKey(key), &token); err != nil {
+	if err := common.RedisHGetObj(getTokenCacheKey(keyHash), &token); err != nil {
 		return nil, err
 	}
 	if token.Id <= 0 {
 		return nil, fmt.Errorf("token cache is incomplete")
 	}
-	token.Key = key
+	// The hash is stored without its own handle; restore it so callers that
+	// later need to evict or bill this token can do so from the struct.
+	token.KeyHash = keyHash
 	return &token, nil
 }

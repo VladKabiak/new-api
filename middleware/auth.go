@@ -290,11 +290,7 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 		if strings.HasPrefix(key, "Bearer ") || strings.HasPrefix(key, "bearer ") {
 			key = strings.TrimSpace(key[7:])
 		}
-		key = strings.TrimPrefix(key, "sk-")
-		parts := strings.Split(key, "-")
-		key = parts[0]
-
-		token, err := model.GetTokenByKey(key, false)
+		token, err := model.GetTokenByKey(model.HashTokenKey(key), false)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				c.JSON(http.StatusUnauthorized, gin.H{
@@ -344,7 +340,7 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 
 		c.Set("id", token.UserId)
 		c.Set("token_id", token.Id)
-		c.Set("token_key", token.Key)
+		c.Set("token_key", token.KeyHash)
 		c.Next()
 	}
 }
@@ -398,11 +394,11 @@ func TokenAuth() func(c *gin.Context) {
 			if strings.HasPrefix(key, "Bearer ") || strings.HasPrefix(key, "bearer ") {
 				key = strings.TrimSpace(key[7:])
 			}
-			key = strings.TrimPrefix(key, "sk-")
+			key = model.TrimTokenKeyPrefix(key)
 			parts = strings.Split(key, "-")
 			key = parts[0]
 		} else {
-			key = strings.TrimPrefix(key, "sk-")
+			key = model.TrimTokenKeyPrefix(key)
 			parts = strings.Split(key, "-")
 			key = parts[0]
 		}
@@ -489,7 +485,7 @@ func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) e
 	}
 	c.Set("id", token.UserId)
 	c.Set("token_id", token.Id)
-	c.Set("token_key", token.Key)
+	c.Set("token_key", token.KeyHash)
 	c.Set("token_name", token.Name)
 	c.Set("token_unlimited_quota", token.UnlimitedQuota)
 	if !token.UnlimitedQuota {

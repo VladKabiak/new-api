@@ -52,12 +52,13 @@ func maxTokenQuota() int {
 	return quota
 }
 
-func buildMaskedTokenResponse(token *model.Token) *tokenResponse {
+// buildTokenResponse pairs a token with its parsed auto groups. Nothing is
+// masked here: the struct holds no cleartext key, only key_prefix, and the
+// client renders the mask from that.
+func buildTokenResponse(token *model.Token) *tokenResponse {
 	if token == nil {
 		return nil
 	}
-	maskedToken := *token
-	maskedToken.Key = token.GetMaskedKey()
 	autoGroups, err := token.GetAutoGroups()
 	if err != nil {
 		common.SysError(fmt.Sprintf("failed to parse auto groups for token %d: %v", token.Id, err))
@@ -66,15 +67,15 @@ func buildMaskedTokenResponse(token *model.Token) *tokenResponse {
 	if len(autoGroups) == 0 {
 		autoGroups = nil
 	}
-	return &tokenResponse{Token: &maskedToken, AutoGroups: autoGroups}
+	return &tokenResponse{Token: token, AutoGroups: autoGroups}
 }
 
-func buildMaskedTokenResponses(tokens []*model.Token) []*tokenResponse {
-	maskedTokens := make([]*tokenResponse, 0, len(tokens))
+func buildTokenResponses(tokens []*model.Token) []*tokenResponse {
+	responses := make([]*tokenResponse, 0, len(tokens))
 	for _, token := range tokens {
-		maskedTokens = append(maskedTokens, buildMaskedTokenResponse(token))
+		responses = append(responses, buildTokenResponse(token))
 	}
-	return maskedTokens
+	return responses
 }
 
 func getTokenRequestUserGroup(c *gin.Context) (string, error) {
@@ -137,7 +138,7 @@ func GetAllTokens(c *gin.Context) {
 	}
 	total, _ := model.CountUserTokens(userId)
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(buildMaskedTokenResponses(tokens))
+	pageInfo.SetItems(tokens)
 	common.ApiSuccess(c, pageInfo)
 }
 
@@ -154,7 +155,7 @@ func SearchTokens(c *gin.Context) {
 		return
 	}
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(buildMaskedTokenResponses(tokens))
+	pageInfo.SetItems(tokens)
 	common.ApiSuccess(c, pageInfo)
 }
 
@@ -170,7 +171,7 @@ func GetToken(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, buildMaskedTokenResponse(token))
+	common.ApiSuccess(c, buildTokenResponse(token))
 }
 
 func GetTokenAutoGroups(c *gin.Context) {
@@ -182,23 +183,6 @@ func GetTokenAutoGroups(c *gin.Context) {
 	common.ApiSuccess(c, gin.H{
 		"groups":    service.GetUserAutoGroup(userGroup),
 		"max_count": setting.GetMaxTokenAutoGroups(),
-	})
-}
-
-func GetTokenKey(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
-	userId := c.GetInt("id")
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	token, err := model.GetTokenByIds(id, userId)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	common.ApiSuccess(c, gin.H{
-		"key": token.GetFullKey(),
 	})
 }
 
@@ -243,7 +227,7 @@ func GetTokenUsage(c *gin.Context) {
 	}
 	tokenKey := parts[1]
 
-	token, err := model.GetTokenByKey(strings.TrimPrefix(tokenKey, "sk-"), false)
+	token, err := model.GetTokenByKey(model.HashTokenKey(tokenKey), false)
 	if err != nil {
 		common.SysError("failed to get token by key: " + err.Error())
 		common.ApiErrorI18n(c, i18n.MsgTokenGetInfoFailed)
@@ -327,7 +311,8 @@ func AddToken(c *gin.Context) {
 	cleanToken := model.Token{
 		UserId:             c.GetInt("id"),
 		Name:               token.Name,
-		Key:                key,
+		KeyHash:            model.HashTokenKey(key),
+		KeyPrefix:          model.BuildTokenKeyPrefix(key),
 		CreatedTime:        common.GetTimestamp(),
 		AccessedTime:       common.GetTimestamp(),
 		ExpiredTime:        token.ExpiredTime,
@@ -348,6 +333,10 @@ func AddToken(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
+		"data": gin.H{
+			"id":  cleanToken.Id,
+			"key": key,
+		},
 	})
 }
 
@@ -435,7 +424,7 @@ func UpdateToken(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    buildMaskedTokenResponse(cleanToken),
+		"data":    cleanToken,
 	})
 }
 
@@ -460,27 +449,4 @@ func DeleteTokenBatch(c *gin.Context) {
 		"message": "",
 		"data":    count,
 	})
-}
-
-func GetTokenKeysBatch(c *gin.Context) {
-	tokenBatch := TokenBatch{}
-	if err := c.ShouldBindJSON(&tokenBatch); err != nil || len(tokenBatch.Ids) == 0 {
-		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
-		return
-	}
-	if len(tokenBatch.Ids) > 100 {
-		common.ApiErrorI18n(c, i18n.MsgBatchTooMany, map[string]any{"Max": 100})
-		return
-	}
-	userId := c.GetInt("id")
-	tokens, err := model.GetTokenKeysByIds(tokenBatch.Ids, userId)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	keysMap := make(map[int]string)
-	for _, t := range tokens {
-		keysMap[t.Id] = t.GetFullKey()
-	}
-	common.ApiSuccess(c, gin.H{"keys": keysMap})
 }

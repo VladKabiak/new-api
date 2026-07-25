@@ -70,15 +70,16 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 // 异步任务计费辅助函数
 // ---------------------------------------------------------------------------
 
-// resolveTokenKey 通过 TokenId 运行时获取令牌 Key（用于 Redis 缓存操作）。
+// resolveTokenKeyHash 通过 TokenId 运行时获取令牌的 key 哈希（用于 Redis 缓存操作）。
+// 令牌明文不再入库，缓存句柄即 key_hash 列。
 // 如果令牌已被删除或查询失败，返回空字符串。
-func resolveTokenKey(ctx context.Context, tokenId int, taskID string) string {
+func resolveTokenKeyHash(ctx context.Context, tokenId int, taskID string) string {
 	token, err := model.GetTokenById(tokenId)
 	if err != nil {
 		logger.LogWarn(ctx, fmt.Sprintf("获取令牌 key 失败 (tokenId=%d, task=%s): %s", tokenId, taskID, err.Error()))
 		return ""
 	}
-	return token.Key
+	return token.KeyHash
 }
 
 // taskIsSubscription 判断任务是否通过订阅计费。
@@ -98,12 +99,12 @@ func taskAdjustFunding(task *model.Task, delta int) error {
 }
 
 // taskAdjustTokenQuota 调整任务的令牌额度，delta > 0 表示扣费，delta < 0 表示退还。
-// 需要通过 resolveTokenKey 运行时获取 key（不从 PrivateData 中读取）。
+// 需要通过 resolveTokenKeyHash 运行时获取缓存句柄（不从 PrivateData 中读取）。
 func taskAdjustTokenQuota(ctx context.Context, task *model.Task, delta int) {
 	if task.PrivateData.TokenId <= 0 || delta == 0 {
 		return
 	}
-	tokenKey := resolveTokenKey(ctx, task.PrivateData.TokenId, task.TaskID)
+	tokenKey := resolveTokenKeyHash(ctx, task.PrivateData.TokenId, task.TaskID)
 	if tokenKey == "" {
 		return
 	}
