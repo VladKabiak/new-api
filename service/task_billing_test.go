@@ -86,7 +86,7 @@ func seedToken(t *testing.T, id int, userId int, key string, remainQuota int) {
 	token := &model.Token{
 		Id:          id,
 		UserId:      userId,
-		Key:         key,
+		KeyHash:     model.HashTokenKey(key),
 		Name:        "test_token",
 		Status:      common.TokenStatusEnabled,
 		RemainQuota: remainQuota,

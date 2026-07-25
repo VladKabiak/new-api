@@ -22,8 +22,8 @@ func setupFlowControllerTestDB(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.Token{}, &model.QuotaData{}))
 	require.NoError(t, model.DB.Create(&model.Channel{Id: 1, Name: "east"}).Error)
-	require.NoError(t, model.DB.Create(&model.Token{Id: 11, UserId: 1, Key: "sk-primary", Name: "primary"}).Error)
-	require.NoError(t, model.DB.Create(&model.Token{Id: 22, UserId: 2, Key: "sk-backup", Name: "backup"}).Error)
+	require.NoError(t, model.DB.Create(&model.Token{Id: 11, UserId: 1, KeyHash: model.HashTokenKey("sk-primary"), Name: "primary"}).Error)
+	require.NoError(t, model.DB.Create(&model.Token{Id: 22, UserId: 2, KeyHash: model.HashTokenKey("sk-backup"), Name: "backup"}).Error)
 	require.NoError(t, model.DB.Create(&model.QuotaData{
 		UserID:    1,
 		Username:  "alice",

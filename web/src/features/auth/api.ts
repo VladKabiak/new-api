@@ -180,8 +180,10 @@ export async function telegramLogin(
 // Registration
 // ----------------------------------------------------------------------------
 
-// User registration
-export async function register(payload: RegisterPayload): Promise<ApiResponse> {
+// User registration.
+export async function register(
+  payload: RegisterPayload
+): Promise<ApiResponse & { data?: { default_token_key?: string } }> {
   const res = await api.post(`/api/user/register`, payload, {
     params: { turnstile: payload.turnstile ?? '' },
   })
