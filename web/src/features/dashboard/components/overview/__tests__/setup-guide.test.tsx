@@ -60,7 +60,9 @@ beforeEach(() => {
           data: {
             success: true,
             data: {
-              items: [{ id: 1, name: 'App key', key: 'masked', status: 1 }],
+              items: [
+                { id: 1, name: 'App key', key_prefix: 'demo1234', status: 1 },
+              ],
             },
           },
         }

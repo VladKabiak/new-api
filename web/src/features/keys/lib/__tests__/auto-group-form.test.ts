@@ -37,7 +37,7 @@ const t = ((key: string, options?: Record<string, unknown>) => {
 const baseApiKey: ApiKey = {
   id: 1,
   name: 'test',
-  key: 'sk-test',
+  key_prefix: 'testkey1',
   status: 1,
   remain_quota: 0,
   used_quota: 0,

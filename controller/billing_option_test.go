@@ -272,12 +272,13 @@ func TestPreConsumePolicyDatabaseMatrix(t *testing.T) {
 					require.NoError(t, model.UpdateOption("quota_setting.pre_consume_multiplier", strconv.FormatFloat(tc.multiplier, 'f', -1, 64)))
 					user := model.User{Username: fmt.Sprintf("policy-user-%d", i), Quota: tc.wallet, Group: "default", AffCode: fmt.Sprintf("policy-aff-%d", i)}
 					require.NoError(t, db.Create(&user).Error)
-					token := model.Token{UserId: user.Id, Key: fmt.Sprintf("policy-token-%d", i), RemainQuota: tc.token, UnlimitedQuota: tc.unlimited}
+					tokenKey := fmt.Sprintf("policytoken%d", i)
+					token := model.Token{UserId: user.Id, KeyHash: model.HashTokenKey(tokenKey), RemainQuota: tc.token, UnlimitedQuota: tc.unlimited}
 					require.NoError(t, db.Create(&token).Error)
 					ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 					ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 					ctx.Set("token_quota", tc.token)
-					info := &relaycommon.RelayInfo{UserId: user.Id, TokenId: token.Id, TokenKey: token.Key, TokenUnlimited: tc.unlimited, ForcePreConsume: tc.force, OriginModelName: "policy-model", UserGroup: "default", UsingGroup: "default", BillingRequestInput: &billingexpr.RequestInput{}}
+					info := &relaycommon.RelayInfo{UserId: user.Id, TokenId: token.Id, TokenKey: tokenKey, TokenUnlimited: tc.unlimited, ForcePreConsume: tc.force, OriginModelName: "policy-model", UserGroup: "default", UsingGroup: "default", BillingRequestInput: &billingexpr.RequestInput{}}
 					info.UserSetting.BillingPreference = "wallet_only"
 					price, err := helper.ModelPriceHelper(ctx, info, 1000, &types.TokenCountMeta{MaxTokens: 10000})
 					require.NoError(t, err)

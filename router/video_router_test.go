@@ -52,7 +52,7 @@ func TestGetOpenAIVideoRouteRendersJimengTask(t *testing.T) {
 	require.NoError(t, database.Create(&model.Token{
 		Id:             1,
 		UserId:         91,
-		Key:            "jimengfetch",
+		KeyHash:        model.HashTokenKey("jimengfetch"),
 		Status:         common.TokenStatusEnabled,
 		Name:           "jimeng fetch",
 		ExpiredTime:    -1,

@@ -17,7 +17,6 @@ const (
 
 	AccessTokenMaxPerUser        = 20
 	AccessTokenDefaultExpiryDays = 30
-	accessTokenActionReveal      = "reveal"
 	accessTokenScopeSeparator    = ":"
 )
 
@@ -60,7 +59,6 @@ var accessTokenStaticResources = []AccessTokenResource{
 	{Resource: "api_key", LabelKey: "API keys", group: AccessTokenGroupPersonal, minRole: common.RoleCommonUser, Actions: []authz.ActionDefinition{
 		accessTokenView("View API keys and their settings without the full key."),
 		accessTokenEdit("Create, edit, and delete API keys."),
-		{Action: accessTokenActionReveal, LabelKey: "Reveal full keys", DescriptionKey: "View complete API keys."},
 	}},
 	{Resource: "usage", LabelKey: "Usage", group: AccessTokenGroupPersonal, minRole: common.RoleCommonUser, Actions: []authz.ActionDefinition{
 		accessTokenView("View your usage logs, statistics, tasks, and audit logs."),

@@ -27,7 +27,7 @@ func TestListModelsSupportsOpenAIAndGeminiAuthentication(t *testing.T) {
 	require.NoError(t, model.DB.Create(&user).Error)
 	require.NoError(t, model.DB.Create(&model.Token{
 		UserId:         user.Id,
-		Key:            "modelstestkey",
+		KeyHash:        model.HashTokenKey("modelstestkey"),
 		Status:         common.TokenStatusEnabled,
 		ExpiredTime:    -1,
 		UnlimitedQuota: true,

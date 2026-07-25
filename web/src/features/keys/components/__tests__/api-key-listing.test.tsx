@@ -60,7 +60,7 @@ const now = 1_700_000_000_000
 const key = apiKeySchema.parse({
   id: 7,
   name: 'production',
-  key: 'demo********1234',
+  key_prefix: 'demo1234',
   status: 1,
   remain_quota: 40_000_000,
   used_quota: 60_000_000,
@@ -420,31 +420,18 @@ it('keeps expired status when the server refuses reactivation', async () => {
   expect(post).not.toHaveBeenCalled()
 })
 
-it.each([true, false])(
-  'fetches a full key only on explicit copy and honors permission success=%s',
-  async (success) => {
-    const user = userEvent.setup()
-    const { post } = await renderKeysPage()
-    post.mockResolvedValue(
-      success
-        ? { data: { success: true, data: { key: 'fake-key-for-test-only' } } }
-        : { data: { success: false, message: 'Verification required' } }
-    )
-    const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
-    await user.click(screen.getByRole('button', { name: 'Open menu' }))
-    expect(post).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('menuitem', { name: 'Copy Key' }))
-    await waitFor(() => expect(post).toHaveBeenCalledWith('/api/token/7/key'))
-    if (success) {
-      await waitFor(() =>
-        expect(copy).toHaveBeenCalledWith('sk-fake-key-for-test-only')
-      )
-    } else {
-      await screen.findByText('Verification required')
-      expect(copy).not.toHaveBeenCalled()
-    }
-  }
-)
+it('warns instead of fetching when copying a key issued before this page load', async () => {
+  const user = userEvent.setup()
+  const { post } = await renderKeysPage()
+  const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+  await user.click(screen.getByRole('button', { name: 'Open menu' }))
+  await user.click(screen.getByRole('menuitem', { name: 'Copy Key' }))
+  await screen.findByText(
+    'This key can only be copied right after it is created. Create a new key to get a usable value.'
+  )
+  expect(post).not.toHaveBeenCalled()
+  expect(copy).not.toHaveBeenCalled()
+})
 
 it('keeps full mobile information without group or quota section headings', async () => {
   const matchMedia = window.matchMedia
