@@ -116,6 +116,12 @@ func InitOptionMap() {
 	common.OptionMap["WaffoPancakeMinTopUp"] = strconv.Itoa(setting.WaffoPancakeMinTopUp)
 	common.OptionMap["WaffoPancakeStoreID"] = setting.WaffoPancakeStoreID
 	common.OptionMap["WaffoPancakeProductID"] = setting.WaffoPancakeProductID
+	common.OptionMap["TrybitEnabled"] = strconv.FormatBool(setting.TrybitEnabled)
+	common.OptionMap["TrybitApiKey"] = setting.TrybitApiKey
+	common.OptionMap["TrybitSecretKey"] = setting.TrybitSecretKey
+	common.OptionMap["TrybitShopId"] = setting.TrybitShopId
+	common.OptionMap["TrybitUnitPrice"] = strconv.FormatFloat(setting.TrybitUnitPrice, 'f', -1, 64)
+	common.OptionMap["TrybitMinTopUp"] = strconv.Itoa(setting.TrybitMinTopUp)
 	common.OptionMap["TopupGroupRatio"] = common.TopupGroupRatio2JSONString()
 	common.OptionMap["Chats"] = setting.Chats2JsonString()
 	common.OptionMap["AutoGroups"] = setting.AutoGroups2JsonString()
@@ -494,6 +500,18 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.WaffoPancakeStoreID = value
 	case "WaffoPancakeProductID":
 		setting.WaffoPancakeProductID = value
+	case "TrybitEnabled":
+		setting.TrybitEnabled = value == "true"
+	case "TrybitApiKey":
+		setting.TrybitApiKey = value
+	case "TrybitSecretKey":
+		setting.TrybitSecretKey = value
+	case "TrybitShopId":
+		setting.TrybitShopId = value
+	case "TrybitUnitPrice":
+		setting.TrybitUnitPrice, _ = strconv.ParseFloat(value, 64)
+	case "TrybitMinTopUp":
+		setting.TrybitMinTopUp, _ = strconv.Atoi(value)
 	case "WaffoPancakeUnitPrice":
 		setting.WaffoPancakeUnitPrice, _ = strconv.ParseFloat(value, 64)
 	case "WaffoPancakeMinTopUp":

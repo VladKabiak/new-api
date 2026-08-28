@@ -39,6 +39,8 @@ import type {
   WaffoPaymentResponse,
   WaffoPancakePaymentRequest,
   WaffoPancakePaymentResponse,
+  TrybitPaymentRequest,
+  TrybitPaymentResponse,
 } from './types'
 
 // ============================================================================
@@ -176,6 +178,30 @@ export async function requestWaffoPancakePayment(
   request: WaffoPancakePaymentRequest
 ): Promise<WaffoPancakePaymentResponse> {
   const res = await api.post('/api/user/waffo-pancake/pay', request, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+/**
+ * Calculate payment amount for Trybit payment
+ */
+export async function calculateTrybitAmount(
+  request: AmountRequest
+): Promise<AmountResponse> {
+  const res = await api.post('/api/user/trybit/amount', request, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return res.data
+}
+
+/**
+ * Request Trybit payment
+ */
+export async function requestTrybitPayment(
+  request: TrybitPaymentRequest
+): Promise<TrybitPaymentResponse> {
+  const res = await api.post('/api/user/trybit/pay', request, {
     skipBusinessError: true,
   } as Record<string, unknown>)
   return res.data
