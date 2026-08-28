@@ -92,6 +92,26 @@ func isWaffoPancakeWebhookEnabled() bool {
 	return isWaffoPancakeTopUpEnabled()
 }
 
+func isTrybitTopUpEnabled() bool {
+	if !isPaymentComplianceConfirmed() {
+		return false
+	}
+	if !setting.TrybitEnabled {
+		return false
+	}
+	return isTrybitWebhookConfigured() &&
+		strings.TrimSpace(setting.TrybitApiKey) != "" &&
+		strings.TrimSpace(setting.TrybitShopId) != ""
+}
+
+func isTrybitWebhookConfigured() bool {
+	return strings.TrimSpace(setting.TrybitSecretKey) != ""
+}
+
+func isTrybitWebhookEnabled() bool {
+	return isTrybitTopUpEnabled()
+}
+
 func isEpayTopUpEnabled() bool {
 	if !isPaymentComplianceConfirmed() {
 		return false
