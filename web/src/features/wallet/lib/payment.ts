@@ -93,6 +93,16 @@ export function isWaffoPancakePayment(paymentType: string): boolean {
   return paymentType === PAYMENT_TYPES.WAFFO_PANCAKE
 }
 
+/**
+ * Check if payment method is Trybit
+ *
+ * Trybit is a crypto gateway that returns a hosted invoice link, so it takes
+ * the pay_link redirect path rather than the generic epay form submission.
+ */
+export function isTrybitPayment(paymentType: string): boolean {
+  return paymentType === PAYMENT_TYPES.TRYBIT
+}
+
 export interface PaymentProcessors {
   regular: (topupAmount: number, paymentType: string) => Promise<boolean>
   waffo: (topupAmount: number, payMethodIndex: number) => Promise<boolean>
@@ -144,6 +154,10 @@ export function getDefaultPaymentType(topupInfo: TopupInfo | null): string {
     return PAYMENT_TYPES.WAFFO_PANCAKE
   }
 
+  if (topupInfo.enable_trybit_topup) {
+    return PAYMENT_TYPES.TRYBIT
+  }
+
   return DEFAULT_PAYMENT_TYPE
 }
 
@@ -169,6 +183,10 @@ export function getMinTopupAmount(topupInfo: TopupInfo | null): number {
 
   if (topupInfo.enable_waffo_pancake_topup) {
     return topupInfo.waffo_pancake_min_topup || DEFAULT_MIN_TOPUP
+  }
+
+  if (topupInfo.enable_trybit_topup) {
+    return topupInfo.trybit_min_topup || DEFAULT_MIN_TOPUP
   }
 
   return DEFAULT_MIN_TOPUP

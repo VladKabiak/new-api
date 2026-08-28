@@ -45,6 +45,11 @@ export type CreemPaymentResponse = ApiResponse<{ checkout_url: string }>
 export type WaffoPaymentResponse = ApiResponse<
   { payment_url?: string } | string
 >
+export type TrybitPaymentResponse = ApiResponse<{
+  pay_link: string
+  order_id: string
+  expires_at: number
+}>
 export type WaffoPancakePaymentResponse = ApiResponse<
   | {
       checkout_url?: string
@@ -150,6 +155,10 @@ export interface TopupInfo {
   enable_waffo_pancake_topup?: boolean
   /** Minimum topup amount for Waffo Pancake */
   waffo_pancake_min_topup?: number
+  /** Whether Trybit topup is enabled */
+  enable_trybit_topup?: boolean
+  /** Minimum topup amount for Trybit */
+  trybit_min_topup?: number
   /** Whether redemption code usage is enabled */
   enable_redemption?: boolean
   /** Whether compliance confirmation has been completed */
@@ -200,6 +209,14 @@ export interface WaffoPaymentRequest {
  * Waffo Pancake payment request parameters
  */
 export interface WaffoPancakePaymentRequest {
+  /** Topup amount */
+  amount: number
+}
+
+/**
+ * Trybit payment request parameters
+ */
+export interface TrybitPaymentRequest {
   /** Topup amount */
   amount: number
 }

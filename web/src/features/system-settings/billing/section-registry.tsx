@@ -178,6 +178,14 @@ const BILLING_SECTIONS = [
         }}
         waffoPancakeProvisionedStoreID={settings.WaffoPancakeStoreID ?? ''}
         waffoPancakeProvisionedProductID={settings.WaffoPancakeProductID ?? ''}
+        trybitDefaultValues={{
+          TrybitEnabled: settings.TrybitEnabled ?? false,
+          TrybitApiKey: settings.TrybitApiKey ?? '',
+          TrybitSecretKey: settings.TrybitSecretKey ?? '',
+          TrybitShopId: settings.TrybitShopId ?? '',
+          TrybitUnitPrice: settings.TrybitUnitPrice ?? 1,
+          TrybitMinTopUp: settings.TrybitMinTopUp ?? 5,
+        }}
         complianceDefaults={{
           confirmed: settings['payment_setting.compliance_confirmed'] ?? false,
           termsVersion:

@@ -64,6 +64,10 @@ import { AmountOptionsVisualEditor } from './amount-options-visual-editor'
 import { CreemProductsVisualEditor } from './creem-products-visual-editor'
 import { PaymentMethodsVisualEditor } from './payment-methods-visual-editor'
 import {
+  TrybitSettingsSection,
+  type TrybitSettingsValues,
+} from './trybit-settings-section'
+import {
   formatJsonForEditor,
   getJsonError,
   normalizeJsonForComparison,
@@ -177,13 +181,21 @@ const paymentSchema = z.object({
   WaffoPancakeMerchantID: z.string(),
   WaffoPancakePrivateKey: z.string(),
   WaffoPancakeReturnURL: z.string(),
+  TrybitEnabled: z.boolean(),
+  TrybitApiKey: z.string(),
+  TrybitSecretKey: z.string(),
+  TrybitShopId: z.string(),
+  TrybitUnitPrice: z.coerce.number().min(0),
+  TrybitMinTopUp: z.coerce.number().min(1),
 })
 
 type PaymentFormValues = z.infer<typeof paymentSchema>
 type WaffoFormFieldValues = Omit<WaffoSettingsValues, 'WaffoPayMethods'>
 type PaymentBaseFormValues = Omit<
   PaymentFormValues,
-  keyof WaffoFormFieldValues | keyof WaffoPancakeSettingsValues
+  | keyof WaffoFormFieldValues
+  | keyof WaffoPancakeSettingsValues
+  | keyof TrybitSettingsValues
 >
 
 const CURRENT_COMPLIANCE_TERMS_VERSION = 'v1'
@@ -202,6 +214,7 @@ type PaymentSettingsSectionProps = {
   waffoPancakeDefaultValues: WaffoPancakeSettingsValues
   waffoPancakeProvisionedStoreID?: string
   waffoPancakeProvisionedProductID?: string
+  trybitDefaultValues: TrybitSettingsValues
   complianceDefaults: PaymentComplianceDefaults
 }
 
@@ -220,6 +233,7 @@ export function PaymentSettingsSection({
   waffoPancakeDefaultValues,
   waffoPancakeProvisionedStoreID,
   waffoPancakeProvisionedProductID,
+  trybitDefaultValues,
   complianceDefaults,
 }: PaymentSettingsSectionProps) {
   const { t } = useTranslation()
@@ -230,8 +244,14 @@ export function PaymentSettingsSection({
       ...defaultValues,
       ...waffoDefaultValues,
       ...waffoPancakeDefaultValues,
+      ...trybitDefaultValues,
     }),
-    [defaultValues, waffoDefaultValues, waffoPancakeDefaultValues]
+    [
+      defaultValues,
+      waffoDefaultValues,
+      waffoPancakeDefaultValues,
+      trybitDefaultValues,
+    ]
   )
   const initialRef = React.useRef(initialFormValues)
   const defaultsSignature = React.useMemo(
@@ -405,6 +425,19 @@ export function PaymentSettingsSection({
     [setPaymentValue]
   )
 
+  const setTrybitValue = React.useCallback(
+    <K extends keyof TrybitSettingsValues>(
+      key: K,
+      value: TrybitSettingsValues[K]
+    ) => {
+      setPaymentValue(
+        key as keyof PaymentFormValues,
+        value as PaymentFormValues[keyof PaymentFormValues]
+      )
+    },
+    [setPaymentValue]
+  )
+
   React.useEffect(() => {
     const parsedDefaults = JSON.parse(defaultsSignature) as PaymentFormValues
     initialRef.current = parsedDefaults
@@ -458,6 +491,12 @@ export function PaymentSettingsSection({
       WaffoPancakeReturnURL: removeTrailingSlash(
         values.WaffoPancakeReturnURL.trim()
       ),
+      TrybitEnabled: values.TrybitEnabled,
+      TrybitApiKey: values.TrybitApiKey.trim(),
+      TrybitSecretKey: values.TrybitSecretKey.trim(),
+      TrybitShopId: values.TrybitShopId.trim(),
+      TrybitUnitPrice: values.TrybitUnitPrice,
+      TrybitMinTopUp: values.TrybitMinTopUp,
     }
 
     const initial = {
@@ -505,6 +544,10 @@ export function PaymentSettingsSection({
       WaffoPancakeReturnURL: removeTrailingSlash(
         initialRef.current.WaffoPancakeReturnURL.trim()
       ),
+      TrybitEnabled: initialRef.current.TrybitEnabled,
+      TrybitShopId: initialRef.current.TrybitShopId,
+      TrybitUnitPrice: initialRef.current.TrybitUnitPrice,
+      TrybitMinTopUp: initialRef.current.TrybitMinTopUp,
     }
 
     const updates: Array<{ key: string; value: string | number | boolean }> = []
@@ -702,6 +745,32 @@ export function PaymentSettingsSection({
       updates.push({ key: 'WaffoPayMethods', value: sanitized.WaffoPayMethods })
     }
 
+    if (sanitized.TrybitEnabled !== initial.TrybitEnabled) {
+      updates.push({ key: 'TrybitEnabled', value: sanitized.TrybitEnabled })
+    }
+
+    if (sanitized.TrybitShopId !== initial.TrybitShopId) {
+      updates.push({ key: 'TrybitShopId', value: sanitized.TrybitShopId })
+    }
+
+    if (sanitized.TrybitUnitPrice !== initial.TrybitUnitPrice) {
+      updates.push({ key: 'TrybitUnitPrice', value: sanitized.TrybitUnitPrice })
+    }
+
+    if (sanitized.TrybitMinTopUp !== initial.TrybitMinTopUp) {
+      updates.push({ key: 'TrybitMinTopUp', value: sanitized.TrybitMinTopUp })
+    }
+
+    // The API returns secrets masked, so the form always starts empty: push
+    // whatever the operator typed and leave the stored value alone otherwise.
+    if (sanitized.TrybitApiKey) {
+      updates.push({ key: 'TrybitApiKey', value: sanitized.TrybitApiKey })
+    }
+
+    if (sanitized.TrybitSecretKey) {
+      updates.push({ key: 'TrybitSecretKey', value: sanitized.TrybitSecretKey })
+    }
+
     const hasWaffoPancakeChanges =
       sanitized.WaffoPancakeMerchantID !== initial.WaffoPancakeMerchantID ||
       sanitized.WaffoPancakePrivateKey.length > 0 ||
@@ -797,6 +866,14 @@ export function PaymentSettingsSection({
     WaffoPancakePrivateKey: currentFormValues.WaffoPancakePrivateKey,
     WaffoPancakeReturnURL: currentFormValues.WaffoPancakeReturnURL,
   }
+  const trybitValues: TrybitSettingsValues = {
+    TrybitEnabled: currentFormValues.TrybitEnabled,
+    TrybitApiKey: currentFormValues.TrybitApiKey,
+    TrybitSecretKey: currentFormValues.TrybitSecretKey,
+    TrybitShopId: currentFormValues.TrybitShopId,
+    TrybitUnitPrice: currentFormValues.TrybitUnitPrice,
+    TrybitMinTopUp: currentFormValues.TrybitMinTopUp,
+  }
 
   return (
     <SettingsSection title={t('Payment Gateway')}>
@@ -879,13 +956,14 @@ export function PaymentSettingsSection({
           />
           <Tabs defaultValue='general' className='min-w-0'>
             <div className='overflow-x-auto pb-1'>
-              <TabsList className='grid min-w-[44rem] grid-cols-6'>
+              <TabsList className='grid min-w-[52rem] grid-cols-7'>
                 <TabsTrigger value='general'>{t('General')}</TabsTrigger>
                 <TabsTrigger value='epay'>Epay</TabsTrigger>
                 <TabsTrigger value='stripe'>{t('Stripe')}</TabsTrigger>
                 <TabsTrigger value='creem'>Creem</TabsTrigger>
                 <TabsTrigger value='waffo-pancake'>Waffo Pancake</TabsTrigger>
                 <TabsTrigger value='waffo'>Waffo</TabsTrigger>
+                <TabsTrigger value='trybit'>Trybit</TabsTrigger>
               </TabsList>
             </div>
 
@@ -1626,6 +1704,13 @@ export function PaymentSettingsSection({
                 onValueChange={setWaffoValue}
                 payMethods={waffoPayMethods}
                 onPayMethodsChange={setWaffoPayMethods}
+              />
+            </TabsContent>
+
+            <TabsContent value='trybit' className={paymentTabContentClassName}>
+              <TrybitSettingsSection
+                values={trybitValues}
+                onValueChange={setTrybitValue}
               />
             </TabsContent>
           </Tabs>
