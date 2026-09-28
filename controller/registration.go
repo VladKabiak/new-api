@@ -16,6 +16,7 @@ import (
 
 const (
 	registrationCodeInvalid  = "Код неверен или истёк"
+	passwordResetLocked      = "Слишком много попыток, попробуйте позже"
 	registrationEmailInvalid = "Некорректный адрес электронной почты"
 	registrationWeakPassword = "Пароль должен быть от 8 до 20 символов"
 )
@@ -26,8 +27,8 @@ type registrationRequest struct {
 }
 
 type registrationConfirmRequest struct {
-	Email string `json:"email"`
-	Code  string `json:"code"`
+	Handle string `json:"handle"`
+	Code   string `json:"code"`
 }
 
 func registrationEmailRestriction(email string) string {
@@ -121,8 +122,17 @@ func RequestRegistrationCode(c *gin.Context) {
 		return
 	}
 
-	code := common.GenerateEmailCode()
-	common.RegisterPendingRegistration(email, req.Password, code)
+	code, err := common.GenerateEmailCode()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	handle, err := common.NewRegistrationHandle()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.RegisterPendingRegistration(handle, email, req.Password, code)
 	subject := fmt.Sprintf("Подтверждение регистрации - %s", common.SystemName)
 	content := common.MailLayout(system_setting.ServerAddress, "Подтвердите адрес почты",
 		common.MailText(fmt.Sprintf("Этот адрес указали при регистрации в %s. Введите код на странице регистрации, чтобы создать аккаунт.", common.SystemName))+
@@ -132,7 +142,7 @@ func RequestRegistrationCode(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"handle": handle}})
 }
 
 // ConfirmRegistration consumes the emailed code, creates the account and signs
@@ -143,7 +153,7 @@ func ConfirmRegistration(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
-	pending, okay := common.TakePendingRegistration(model.NormalizeEmail(req.Email), strings.TrimSpace(req.Code))
+	pending, okay := common.TakePendingRegistration(strings.TrimSpace(req.Handle), strings.TrimSpace(req.Code))
 	if !okay {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": registrationCodeInvalid})
 		return

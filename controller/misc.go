@@ -276,16 +276,18 @@ func SendPasswordResetEmail(c *gin.Context) {
 		return
 	}
 	if _, err := model.GetUniqueUserByEmail(email); err == nil {
-		code := common.GenerateEmailCode()
+		code, err := common.GenerateEmailCode()
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
 		common.RegisterVerificationCodeWithKey(email, code, common.PasswordResetPurpose)
-		common.ClearCodeAttempts(common.PasswordResetPurpose + email)
 		subject := fmt.Sprintf("Сброс пароля - %s", common.SystemName)
 		content := common.MailLayout(system_setting.ServerAddress, "Сброс пароля",
 			common.MailText(fmt.Sprintf("Поступил запрос на сброс пароля в %s. Введите код на странице восстановления, чтобы получить новый пароль.", common.SystemName))+
 				common.MailCode(code)+
 				common.MailValidity(common.VerificationValidMinutes))
-		err := common.SendEmail(subject, email, content)
-		if err != nil {
+		if err = common.SendEmail(subject, email, content); err != nil {
 			logger.LogError(c.Request.Context(), fmt.Sprintf("failed to send password reset email to %s: %s", email, err.Error()))
 		}
 	} else if err != nil && !errors.Is(err, model.ErrEmailNotFound) {
@@ -316,8 +318,7 @@ func ResetPassword(c *gin.Context) {
 	}
 	attemptKey := common.PasswordResetPurpose + req.Email
 	if !common.SpendCodeAttempt(attemptKey) {
-		common.DeleteKey(req.Email, common.PasswordResetPurpose)
-		common.ApiErrorI18n(c, i18n.MsgUserPasswordResetLinkInvalid)
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": passwordResetLocked})
 		return
 	}
 	if !common.VerifyCodeWithKey(req.Email, req.Token, common.PasswordResetPurpose) {
