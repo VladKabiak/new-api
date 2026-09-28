@@ -251,14 +251,14 @@ func SendPasswordResetEmail(c *gin.Context) {
 		return
 	}
 	if _, err := model.GetUniqueUserByEmail(email); err == nil {
-		code := common.GenerateVerificationCode(0)
+		code := common.GenerateEmailCode()
 		common.RegisterVerificationCodeWithKey(email, code, common.PasswordResetPurpose)
-		link := fmt.Sprintf("%s/user/reset?email=%s&token=%s", system_setting.ServerAddress, email, code)
+		common.ClearCodeAttempts(common.PasswordResetPurpose + email)
 		subject := fmt.Sprintf("Сброс пароля - %s", common.SystemName)
-		content := fmt.Sprintf("<p>Поступил запрос на сброс пароля в %s.</p>"+
-			"<p><a href='%s'>Задать новый пароль</a></p>"+
-			"<p>Если ссылка не открывается, скопируйте её в адресную строку браузера:<br>%s</p>"+
-			"<p>Ссылка действует %d минут. Если вы ничего не запрашивали, просто проигнорируйте это письмо.</p>", common.SystemName, link, link, common.VerificationValidMinutes)
+		content := common.MailLayout(system_setting.ServerAddress, "Сброс пароля",
+			common.MailText(fmt.Sprintf("Поступил запрос на сброс пароля в %s. Введите код на странице восстановления, чтобы получить новый пароль.", common.SystemName))+
+				common.MailCode(code)+
+				common.MailValidity(common.VerificationValidMinutes))
 		err := common.SendEmail(subject, email, content)
 		if err != nil {
 			logger.LogError(c.Request.Context(), fmt.Sprintf("failed to send password reset email to %s: %s", email, err.Error()))
@@ -289,10 +289,17 @@ func ResetPassword(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
+	attemptKey := common.PasswordResetPurpose + req.Email
+	if !common.SpendCodeAttempt(attemptKey) {
+		common.DeleteKey(req.Email, common.PasswordResetPurpose)
+		common.ApiErrorI18n(c, i18n.MsgUserPasswordResetLinkInvalid)
+		return
+	}
 	if !common.VerifyCodeWithKey(req.Email, req.Token, common.PasswordResetPurpose) {
 		common.ApiErrorI18n(c, i18n.MsgUserPasswordResetLinkInvalid)
 		return
 	}
+	common.ClearCodeAttempts(attemptKey)
 	password := common.GenerateVerificationCode(12)
 	err = model.ResetUserPasswordByEmail(req.Email, password)
 	if err != nil {
