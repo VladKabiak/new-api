@@ -166,8 +166,9 @@ export async function wechatLoginByCode(code: string): Promise<ApiResponse> {
 export async function telegramLogin(
   authorization: TelegramAuthorization
 ): Promise<ApiResponse> {
+  const aff = getAffiliateCode()
   const res = await api.get('/api/oauth/telegram/login', {
-    params: authorization,
+    params: aff ? { ...authorization, aff } : authorization,
     disableDuplicate: true,
     skipAuthRefresh: true,
     skipBusinessError: true,

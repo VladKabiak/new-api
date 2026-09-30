@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
 	"github.com/gin-gonic/gin"
@@ -534,7 +536,11 @@ func UnbindCustomOAuth(c *gin.Context) {
 		return
 	}
 
-	if err := model.DeleteUserOAuthBinding(userId, providerId); err != nil {
+	if err := model.DeleteUserOAuthBinding(userId, providerId, true); err != nil {
+		if errors.Is(err, model.ErrLastLoginMethod) {
+			common.ApiErrorI18n(c, i18n.MsgUserLastLoginMethod)
+			return
+		}
 		common.ApiError(c, err)
 		return
 	}
@@ -572,7 +578,7 @@ func UnbindCustomOAuthByAdmin(c *gin.Context) {
 		return
 	}
 
-	if err := model.DeleteUserOAuthBinding(userId, providerId); err != nil {
+	if err := model.DeleteUserOAuthBinding(userId, providerId, false); err != nil {
 		common.ApiError(c, err)
 		return
 	}

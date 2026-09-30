@@ -14,6 +14,10 @@ var (
 	ErrEmailAlreadyTaken    = errors.New("email already taken")
 	ErrEmailNotFound        = errors.New("email not found")
 	ErrEmailAmbiguous       = errors.New("email matches multiple users")
+
+	ErrTelegramAccountNotBound = errors.New("telegram account is not bound")
+	ErrLastLoginMethod         = errors.New("cannot clear the only login method")
+	ErrOAuthBindingNotFound    = errors.New("oauth binding not found")
 )
 
 // Token auth errors

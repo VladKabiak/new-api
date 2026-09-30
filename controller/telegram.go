@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
@@ -27,6 +29,8 @@ const (
 	telegramAuthorizationMaxAge     = 5 * time.Minute
 	telegramAuthorizationFutureSkew = 2 * time.Minute
 	telegramBindFlowTTL             = 5 * time.Minute
+	telegramAffiliateParam          = "aff"
+	telegramRegisterAttempts        = 3
 
 	telegramBindErrorDisabled       = "TELEGRAM_BIND_DISABLED"
 	telegramBindErrorInvalidRequest = "TELEGRAM_BIND_INVALID_REQUEST"
@@ -43,6 +47,10 @@ var (
 	errTelegramBindAssertionInvalid = errors.New("telegram bind assertion is invalid")
 	errTelegramBindUserDeleted      = errors.New("telegram bind user was deleted")
 	errTelegramBindUserDisabled     = errors.New("telegram bind user is disabled")
+
+	errTelegramRegisterDisabled = errors.New("telegram registration is disabled")
+	errTelegramIdTaken          = errors.New("telegram id already belongs to another account")
+	errTelegramAssertionSpent   = errors.New("telegram assertion has already been used")
 )
 
 func TelegramBindStart(c *gin.Context) {
@@ -235,48 +243,127 @@ func telegramBindFailure(c *gin.Context, errorCode string) {
 
 func TelegramLogin(c *gin.Context) {
 	if !common.TelegramOAuthEnabled {
-		c.JSON(200, gin.H{
-			"message": "管理员未开启通过 Telegram 登录以及注册",
-			"success": false,
-		})
+		common.ApiErrorI18n(c, i18n.MsgUserTelegramLoginDisabled)
 		return
 	}
 	params := c.Request.URL.Query()
+	affiliateCode := params.Get(telegramAffiliateParam)
+	params.Del(telegramAffiliateParam)
 	telegramId, err := verifyTelegramAuthorization(params, common.TelegramBotToken, time.Now())
 	if err != nil {
 		common.SysLog("TelegramLogin authorization failed: " + err.Error())
-		c.JSON(200, gin.H{
-			"message": "无效的请求",
-			"success": false,
-		})
+		common.ApiErrorI18n(c, i18n.MsgUserTelegramRequestInvalid)
+		return
+	}
+	assertion, assertionExpiresAt, err := telegramAuthorizationClaim(params, time.Now())
+	if err != nil {
+		common.SysLog("TelegramLogin authorization claim failed: " + err.Error())
+		common.ApiErrorI18n(c, i18n.MsgUserTelegramRequestInvalid)
 		return
 	}
 
 	user := model.User{TelegramId: telegramId}
-	if err := user.FillUserByTelegramId(); err != nil {
-		c.JSON(200, gin.H{
-			"message": err.Error(),
-			"success": false,
-		})
+	lookupErr := user.FillUserByTelegramId()
+	if lookupErr != nil && !errors.Is(lookupErr, model.ErrTelegramAccountNotBound) {
+		common.SysError("TelegramLogin user lookup failed: " + lookupErr.Error())
+		common.ApiErrorI18n(c, i18n.MsgDatabaseError)
 		return
 	}
-	if err := claimTelegramAuthorization(params, time.Now()); err != nil {
-		common.SysLog("TelegramLogin assertion replay rejected: " + err.Error())
-		c.JSON(http.StatusForbidden, gin.H{
-			"message": "该登录凭据已被使用",
-			"success": false,
-		})
+
+	if lookupErr != nil {
+		registered, registerErr := registerTelegramUser(telegramId, params, affiliateCode, assertion, assertionExpiresAt)
+		switch {
+		case registerErr == nil:
+			setupLogin(registered, c)
+			return
+		case errors.Is(registerErr, errTelegramRegisterDisabled):
+			common.ApiErrorI18n(c, i18n.MsgUserRegisterDisabled)
+			return
+		case errors.Is(registerErr, errTelegramAssertionSpent):
+			rejectSpentTelegramAssertion(c, registerErr)
+			return
+		case errors.Is(registerErr, errTelegramIdTaken):
+			if err := user.FillUserByTelegramId(); err != nil {
+				if errors.Is(err, model.ErrTelegramAccountNotBound) {
+					common.ApiErrorI18n(c, i18n.MsgOAuthUserDeleted)
+					return
+				}
+				common.SysError("TelegramLogin user lookup failed: " + err.Error())
+				common.ApiErrorI18n(c, i18n.MsgDatabaseError)
+				return
+			}
+		default:
+			common.SysError("TelegramLogin registration failed: " + registerErr.Error())
+			common.ApiErrorI18n(c, i18n.MsgUserTelegramRegisterFailed)
+			return
+		}
+	}
+
+	if user.Status != common.UserStatusEnabled {
+		common.ApiErrorI18n(c, i18n.MsgAuthUserBanned)
+		return
+	}
+	if err := model.ClaimExternalAuthAssertion(model.AuthFlowPurposeTelegramAssertion, assertion, assertionExpiresAt); err != nil {
+		rejectSpentTelegramAssertion(c, err)
 		return
 	}
 	setupLogin(&user, c)
 }
 
-func claimTelegramAuthorization(params url.Values, now time.Time) error {
-	assertion, expiresAt, err := telegramAuthorizationClaim(params, now)
-	if err != nil {
-		return err
+func registerTelegramUser(telegramId string, params url.Values, affiliateCode string, assertion string, assertionExpiresAt time.Time) (*model.User, error) {
+	if !common.RegisterEnabled {
+		return nil, errTelegramRegisterDisabled
 	}
-	return model.ClaimExternalAuthAssertion(model.AuthFlowPurposeTelegramAssertion, assertion, expiresAt)
+	displayName := strings.TrimSpace(params.Get("first_name") + " " + params.Get("last_name"))
+	if runes := []rune(displayName); len(runes) > model.DisplayNameMaxLength {
+		displayName = strings.TrimSpace(string(runes[:model.DisplayNameMaxLength]))
+	}
+	inviterId := 0
+	if affiliateCode != "" {
+		inviterId, _ = model.GetUserIdByAffCode(affiliateCode)
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < telegramRegisterAttempts; attempt++ {
+		user := model.User{
+			TelegramId:  telegramId,
+			DisplayName: displayName,
+			Role:        common.RoleCommonUser,
+			Status:      common.UserStatusEnabled,
+		}
+		lastErr = model.DB.Transaction(func(tx *gorm.DB) error {
+			username, err := freeUsername(tx, params.Get("username"), "tg"+telegramId)
+			if err != nil {
+				return err
+			}
+			user.Username = username
+			if user.DisplayName == "" {
+				user.DisplayName = username
+			}
+			if err := model.ClaimExternalAuthAssertionWithTx(tx, model.AuthFlowPurposeTelegramAssertion, assertion, assertionExpiresAt); err != nil {
+				return err
+			}
+			if err := user.InsertWithTx(tx, inviterId); err != nil {
+				return err
+			}
+			return model.ClaimExternalIdentityWithTx(tx, model.ExternalIdentityProviderTelegram, telegramId, user.Id)
+		})
+		switch {
+		case lastErr == nil:
+			user.FinalizeOAuthUserCreation(inviterId)
+			return &user, nil
+		case errors.Is(lastErr, model.ErrExternalIdentityAlreadyClaimed):
+			return nil, errTelegramIdTaken
+		case errors.Is(lastErr, model.ErrAuthFlowConsumed), errors.Is(lastErr, model.ErrAuthFlowInvalid):
+			return nil, errTelegramAssertionSpent
+		}
+	}
+	return nil, fmt.Errorf("telegram registration failed: %w", lastErr)
+}
+
+func rejectSpentTelegramAssertion(c *gin.Context, err error) {
+	common.SysLog("TelegramLogin assertion replay rejected: " + err.Error())
+	common.ApiErrorI18n(c, i18n.MsgUserTelegramAssertionSpent)
 }
 
 func telegramAuthorizationClaim(params url.Values, now time.Time) (string, time.Time, error) {
@@ -310,6 +397,9 @@ func verifyTelegramAuthorization(params url.Values, token string, now time.Time)
 	authDateText := params.Get("auth_date")
 	if telegramID == "" || hash == "" || authDateText == "" {
 		return "", errors.New("telegram authorization is incomplete")
+	}
+	if _, err := strconv.ParseInt(telegramID, 10, 64); err != nil {
+		return "", errors.New("telegram authorization id is invalid")
 	}
 	authDate, err := strconv.ParseInt(authDateText, 10, 64)
 	if err != nil {

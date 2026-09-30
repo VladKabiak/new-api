@@ -189,13 +189,13 @@ export function useOAuthLogin(
     try {
       const response = await telegramLogin(authorization)
       if (!response.success || !isAuthBundle(response.data)) {
-        toast.error(t('Login failed'))
+        toast.error(response.message || t('Login failed'))
         return
       }
 
       setIsTelegramDialogOpen(false)
       await handleLoginSuccess(response.data, redirectTo)
-      toast.success(t('Welcome back!'))
+      toast.success(t('Signed in successfully!'))
     } catch {
       toast.error(t('Login failed'))
     } finally {

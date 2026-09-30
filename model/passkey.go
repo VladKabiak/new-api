@@ -215,7 +215,7 @@ func UpsertPasskeyCredentialWithAuthVersion(credential *PasskeyCredential) error
 	return PublishUserAuthCache(credential.UserID)
 }
 
-func DeletePasskeyByUserIDWithAuthVersion(userID int) error {
+func DeletePasskeyByUserIDWithAuthVersion(userID int, enforceLoginMethod bool) error {
 	if userID == 0 {
 		return fmt.Errorf("删除失败，请重试")
 	}
@@ -237,7 +237,10 @@ func DeletePasskeyByUserIDWithAuthVersion(userID int) error {
 		if result.RowsAffected != 1 {
 			return ErrPasskeyNotFound
 		}
-		return nil
+		if !enforceLoginMethod {
+			return nil
+		}
+		return EnsureLoginMethodRemains(tx, userID)
 	}); err != nil {
 		return err
 	}

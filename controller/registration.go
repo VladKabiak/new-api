@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 const (
@@ -58,34 +59,41 @@ func registrationEmailRestriction(email string) string {
 	return ""
 }
 
-func usernameFromEmail(email string) (string, error) {
+func usernameCharacters(source string) string {
 	var builder strings.Builder
-	for _, symbol := range strings.ToLower(strings.Split(email, "@")[0]) {
+	for _, symbol := range strings.ToLower(source) {
 		if (symbol >= 'a' && symbol <= 'z') || (symbol >= '0' && symbol <= '9') || symbol == '_' || symbol == '-' {
 			builder.WriteRune(symbol)
 		}
 	}
-	base := builder.String()
-	if len(base) > 12 {
-		base = base[:12]
+	return builder.String()
+}
+
+func freeUsername(tx *gorm.DB, suggestion string, fallback string) (string, error) {
+	base := usernameCharacters(suggestion)
+	if base == "" {
+		base = usernameCharacters(fallback)
 	}
 	if base == "" {
-		base = "user"
+		return "", fmt.Errorf("no username characters in %q or %q", suggestion, fallback)
+	}
+	if len(base) > 12 {
+		base = base[:12]
 	}
 	for attempt := 0; attempt < 8; attempt++ {
 		candidate := base
 		if attempt > 0 {
 			candidate = base + strings.ToLower(common.GetRandomString(4))
 		}
-		exist, err := model.CheckUserExistOrDeleted(candidate, "")
+		taken, err := model.UsernameTakenWithTx(tx, candidate)
 		if err != nil {
 			return "", err
 		}
-		if !exist {
+		if !taken {
 			return candidate, nil
 		}
 	}
-	return "", fmt.Errorf("failed to derive a free username from %s", email)
+	return "", fmt.Errorf("failed to derive a free username from %q", suggestion)
 }
 
 // RequestRegistrationCode starts a password registration: it holds the
@@ -162,29 +170,32 @@ func ConfirmRegistration(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
 		return
 	}
-	username, err := usernameFromEmail(pending.Email)
-	if err != nil {
-		common.SysLog("registration confirm failed: " + err.Error())
-		common.ApiErrorI18n(c, i18n.MsgUserRegisterFailed)
-		return
-	}
 	user := model.User{
-		Username:    username,
-		Password:    pending.Password,
-		DisplayName: username,
-		Email:       pending.Email,
-		Role:        common.RoleCommonUser,
+		Password: pending.Password,
+		Email:    pending.Email,
+		Role:     common.RoleCommonUser,
 	}
-	if err := user.Insert(0); err != nil {
+	if err := model.DB.Transaction(func(tx *gorm.DB) error {
+		username, err := freeUsername(tx, strings.Split(pending.Email, "@")[0], "user")
+		if err != nil {
+			return err
+		}
+		user.Username = username
+		user.DisplayName = username
+		return user.InsertWithTx(tx, 0)
+	}); err != nil {
 		if errors.Is(err, model.ErrEmailAlreadyTaken) {
 			common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
 			return
 		}
-		common.ApiError(c, err)
+		common.SysLog("registration confirm failed: " + err.Error())
+		common.ApiErrorI18n(c, i18n.MsgUserRegisterFailed)
 		return
 	}
+	user.FinalizeOAuthUserCreation(0)
+
 	var created model.User
-	if err := model.DB.Where("username = ?", username).First(&created).Error; err != nil {
+	if err := model.DB.First(&created, user.Id).Error; err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUserRegisterFailed)
 		return
 	}

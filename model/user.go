@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"gorm.io/gorm"
@@ -18,6 +19,7 @@ import (
 )
 
 const UserNameMaxLength = 20
+const DisplayNameMaxLength = 20
 
 var userSortColumns = map[string]string{
 	"id":            "id",
@@ -299,6 +301,14 @@ func CheckUserExistOrDeleted(username string, email string) (bool, error) {
 	}
 	// exist, return true, nil
 	return true, nil
+}
+
+func UsernameTakenWithTx(tx *gorm.DB, username string) (bool, error) {
+	var count int64
+	if err := tx.Unscoped().Model(&User{}).Where("username = ?", username).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func NormalizeEmail(email string) string {
@@ -903,6 +913,45 @@ func (user *User) ClearBinding(bindingType string) error {
 	return updateUserCache(*user)
 }
 
+func EnsureLoginMethodRemains(tx *gorm.DB, userId int) error {
+	var user User
+	if err := lockForUpdate(tx).First(&user, userId).Error; err != nil {
+		return err
+	}
+
+	mailReachable := common.SMTPServer != "" || common.SMTPAccount != ""
+	usable := (common.PasswordLoginEnabled && user.Password != "") ||
+		(common.PasswordLoginEnabled && user.Email != "" && mailReachable) ||
+		(user.GitHubId != "" && common.GitHubOAuthEnabled) ||
+		(user.WeChatId != "" && common.WeChatAuthEnabled) ||
+		(user.TelegramId != "" && common.TelegramOAuthEnabled) ||
+		(user.LinuxDOId != "" && common.LinuxDOOAuthEnabled) ||
+		(user.OidcId != "" && system_setting.GetOIDCSettings().Enabled) ||
+		(user.DiscordId != "" && system_setting.GetDiscordSettings().Enabled)
+	if usable {
+		return nil
+	}
+
+	var passkeys int64
+	if err := tx.Model(&PasskeyCredential{}).Where("user_id = ?", userId).Count(&passkeys).Error; err != nil {
+		return err
+	}
+	if passkeys > 0 {
+		return nil
+	}
+	var bindings int64
+	enabledProviders := tx.Model(&CustomOAuthProvider{}).Select("id").Where("enabled = ?", true)
+	if err := tx.Model(&UserOAuthBinding{}).
+		Where("user_id = ? AND provider_id IN (?)", userId, enabledProviders).
+		Count(&bindings).Error; err != nil {
+		return err
+	}
+	if bindings > 0 {
+		return nil
+	}
+	return ErrLastLoginMethod
+}
+
 func (user *User) Delete() error {
 	if user.Id == 0 {
 		return errors.New("id 为空！")
@@ -1073,9 +1122,9 @@ func (user *User) FillUserByTelegramId() error {
 	}
 	err := DB.Where(User{TelegramId: user.TelegramId}).First(user).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return errors.New("该 Telegram 账户未绑定")
+		return ErrTelegramAccountNotBound
 	}
-	return nil
+	return err
 }
 
 func IsEmailAlreadyTaken(email string) bool {
